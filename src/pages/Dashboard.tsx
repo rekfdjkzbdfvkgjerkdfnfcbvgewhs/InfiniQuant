@@ -11,6 +11,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { GoogleGenAI } from "@google/genai";
 
+declare global {
+  interface Window {
+    aistudio?: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
+}
+
+const cleanJson = (str: string) => {
+  if (!str) return "{}";
+  return str.replace(/```json/g, '').replace(/```/g, '').trim();
+};
+
 export default function Dashboard({ user }: { user: any }) {
   const [queryText, setQueryText] = useState("Find a recent, significant insider trade or market event in the tech sector that investors need to know about right now.");
   
@@ -48,7 +62,19 @@ export default function Dashboard({ user }: { user: any }) {
     setLoading(true);
     setResult(null);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      console.log("[Orchestration] Starting analysis for query:", queryText);
+
+      // API Key Check
+      if (window.aistudio && window.aistudio.hasSelectedApiKey) {
+        console.log("[Orchestration] Checking for selected API key...");
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          console.log("[Orchestration] Prompting user to select API key...");
+          await window.aistudio.openSelectKey();
+        }
+      }
+
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.API_KEY });
       
       // Step 1: Extract Data
       setLoadingStep("Scouring the web for actionable market events...");
@@ -64,20 +90,26 @@ export default function Dashboard({ user }: { user: any }) {
       Query: "${queryText}"
       
       Format as JSON with: 
+      - eventContext (string, a detailed summary of the specific event/headline you found so it can be passed to the next step)
       - ticker (string, extract from text or find via search, or "UNKNOWN")
       - insiderTrades (array of objects with: category ['Promoter', 'Director', 'Officer', 'Employee'], valueCr (number, in crores/millions), stakeDeltaPct (number), marketCapCr (number), z_score (number)). 
       `;
 
+      console.log("[Orchestration] Step 1: Sending extraction prompt to Gemini...");
       const extractionResponse = await ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: extractionPrompt,
         tools: [{ googleSearch: {} }],
         config: { responseMimeType: "application/json" }
       });
-      const extractedData = JSON.parse(extractionResponse.text || "{}");
+      
+      console.log("[Orchestration] Step 1 Raw Output:", extractionResponse.text);
+      const extractedData = JSON.parse(cleanJson(extractionResponse.text || "{}"));
+      console.log("[Orchestration] Step 1 Parsed Data:", extractedData);
 
       // Step 2: Python Backend Math
       setLoadingStep("Running statistical rigor models (Z-Scores, Fisher's Combined p)...");
+      console.log("[Orchestration] Step 2: Sending data to Python backend...");
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,16 +118,32 @@ export default function Dashboard({ user }: { user: any }) {
           insiderTrades: extractedData.insiderTrades || []
         })
       });
-      const metrics = await response.json();
+      
+      const responseText = await response.text();
+      console.log("[Orchestration] Step 2 Raw Output:", responseText);
+      
+      let metrics;
+      try {
+        metrics = JSON.parse(responseText);
+      } catch (e) {
+        console.error("[Orchestration] Failed to parse Python backend response:", e);
+        throw new Error("Invalid response from Python backend.");
+      }
 
       if (metrics.error) {
+        console.error("[Orchestration] Python backend error:", metrics.error, metrics.traceback);
         throw new Error(metrics.error);
       }
+
+      console.log("[Orchestration] Step 2 Parsed Metrics:", metrics);
 
       // Step 3: Orchestrate article generation
       setLoadingStep("Drafting actionable journalistic narrative & fetching sources...");
       const prompt = `
       You are a quantitative financial journalist. You have been provided with insider trades and price history for ${metrics.ticker}.
+      
+      Event Context (from initial discovery):
+      ${extractedData.eventContext || "N/A"}
       
       Insider Trades:
       ${JSON.stringify(metrics.insider_trades, null, 2)}
@@ -132,6 +180,7 @@ export default function Dashboard({ user }: { user: any }) {
       }
       `;
 
+      console.log("[Orchestration] Step 3: Sending drafting prompt to Gemini...");
       const geminiResponse = await ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: prompt,
@@ -141,11 +190,14 @@ export default function Dashboard({ user }: { user: any }) {
         }
       });
 
-      const resultData = JSON.parse(geminiResponse.text || "{}");
+      console.log("[Orchestration] Step 3 Raw Output:", geminiResponse.text);
+      const resultData = JSON.parse(cleanJson(geminiResponse.text || "{}"));
+      console.log("[Orchestration] Step 3 Parsed Data:", resultData);
+      
       setResult({ ...resultData, ticker: metrics.ticker });
-    } catch (error) {
-      console.error("Analysis failed", error);
-      alert("Analysis failed. Check console for details.");
+    } catch (error: any) {
+      console.error("[Orchestration] Analysis failed with error:", error);
+      alert(`Analysis failed: ${error.message || "Check console for details."}`);
     } finally {
       setLoading(false);
       setLoadingStep("");

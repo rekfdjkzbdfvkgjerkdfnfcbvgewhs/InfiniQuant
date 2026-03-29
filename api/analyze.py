@@ -73,7 +73,8 @@ def process_analysis(data):
             if not hist.empty:
                 price_history = [round(p, 2) for p in hist['Close'].tolist()]
         except Exception as e:
-            pass
+            import traceback
+            print(f"YFinance Error: {e}\n{traceback.format_exc()}", file=sys.stderr)
     
     p_values = []
     for trade in insider_trades:
@@ -109,16 +110,23 @@ def process_analysis(data):
 # Vercel Serverless Function Handler
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data)
-        
-        result = process_analysis(data)
-        
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(result).encode('utf-8'))
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data)
+            
+            result = process_analysis(data)
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode('utf-8'))
+        except Exception as e:
+            import traceback
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e), "traceback": traceback.format_exc()}).encode('utf-8'))
 
 # CLI execution for AI Studio Node.js child_process
 if __name__ == "__main__":
@@ -128,5 +136,6 @@ if __name__ == "__main__":
         result = process_analysis(data)
         print(json.dumps(result))
     except Exception as e:
-        print(json.dumps({"error": str(e)}))
+        import traceback
+        print(json.dumps({"error": str(e), "traceback": traceback.format_exc()}))
 
