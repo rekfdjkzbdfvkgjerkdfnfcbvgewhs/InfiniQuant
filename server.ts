@@ -17,7 +17,7 @@ async function startServer() {
   app.post("/api/analyze", (req, res) => {
     try {
       const pythonProcess = spawn("python3", ["api/analyze.py"], {
-        env: { ...process.env, GEMINI_API_KEY: process.env.GEMINI_API_KEY }
+        env: { ...process.env }
       });
 
       let dataString = "";

@@ -9,6 +9,7 @@ import { collection, addDoc, getDocs, query, orderBy } from "firebase/firestore"
 import { Activity, LogOut, FileText, BarChart, Save, History } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { GoogleGenAI } from "@google/genai";
 
 export default function Dashboard({ user }: { user: any }) {
   const [ticker, setTicker] = useState("TITAN");
@@ -45,6 +46,7 @@ export default function Dashboard({ user }: { user: any }) {
   const handleAnalyze = async () => {
     setLoading(true);
     try {
+      // 1. Get statistical metrics from Python backend
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -54,8 +56,60 @@ export default function Dashboard({ user }: { user: any }) {
           priceHistory: JSON.parse(priceHistory)
         })
       });
-      const data = await response.json();
-      setResult(data);
+      const metrics = await response.json();
+
+      if (metrics.error) {
+        throw new Error(metrics.error);
+      }
+
+      // 2. Orchestrate article generation using Gemini from the frontend
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      const prompt = `
+      You are a quantitative financial journalist. You have been provided with insider trades and price history for ${metrics.ticker}.
+      
+      Insider Trades:
+      ${JSON.stringify(metrics.insider_trades, null, 2)}
+      
+      Price History (last 30 days):
+      ${JSON.stringify(metrics.price_history, null, 2)}
+      
+      Calculated Statistical Metrics:
+      - Fisher's Combined P-Value for Insider Cluster: ${metrics.combined_p.toFixed(4)}
+      - Composite Insider Signal Score: ${metrics.avg_score.toFixed(2)}/1.00
+      
+      Analyze the data and generate a rigorous financial article.
+      The article should include:
+      1. A compelling headline.
+      2. A summary of the insider activity.
+      3. Statistical context (Z-scores, win rates, etc. - use the calculated metrics).
+      4. Market regime context (infer from price history).
+      5. A conclusion on the signal strength.
+      
+      Format the output as a JSON object with the following structure:
+      {
+        "headline": "...",
+        "summary": "...",
+        "articleBody": "...",
+        "signalStrength": "Strong|Moderate|Weak",
+        "keyMetrics": {
+          "zScore": 0.0,
+          "combinedPValue": ${metrics.combined_p.toFixed(4)},
+          "compositeScore": ${metrics.avg_score.toFixed(2)}
+        }
+      }
+      `;
+
+      const geminiResponse = await ai.models.generateContent({
+        model: "gemini-3.1-pro-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+
+      const resultData = JSON.parse(geminiResponse.text || "{}");
+      setResult(resultData);
     } catch (error) {
       console.error("Analysis failed", error);
       alert("Analysis failed. Check console for details.");

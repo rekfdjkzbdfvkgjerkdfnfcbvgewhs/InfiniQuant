@@ -47,27 +47,6 @@ def composite_insider_score(category, value_cr, stake_delta_pct, market_cap_cr, 
     s = w1 * f1 + w2 * f2 + w3 * f3 + w4 * f4
     return min(s + 0.10 * (num_insiders - 1), 1.0)
 
-def call_gemini(prompt):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return {"error": "GEMINI_API_KEY not set"}
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key={api_key}"
-    data = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"responseMimeType": "application/json"}
-    }).encode('utf-8')
-    
-    req = request.Request(url, data=data, headers={'Content-Type': 'application/json'})
-    try:
-        with request.urlopen(req) as response:
-            res_body = response.read()
-            res_json = json.loads(res_body)
-            text = res_json.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '{}')
-            return json.loads(text)
-    except Exception as e:
-        return {"error": str(e)}
-
 def process_analysis(data):
     ticker = data.get("ticker", "UNKNOWN")
     insider_trades = data.get("insiderTrades", [])
@@ -94,42 +73,13 @@ def process_analysis(data):
         
     avg_score = sum(scores) / len(scores) if scores else 0.0
     
-    prompt = f"""
-    You are a quantitative financial journalist. You have been provided with insider trades and price history for {ticker}.
-    
-    Insider Trades:
-    {json.dumps(insider_trades, indent=2)}
-    
-    Price History (last 30 days):
-    {json.dumps(price_history, indent=2)}
-    
-    Calculated Statistical Metrics:
-    - Fisher's Combined P-Value for Insider Cluster: {combined_p:.4f}
-    - Composite Insider Signal Score: {avg_score:.2f}/1.00
-    
-    Analyze the data and generate a rigorous financial article.
-    The article should include:
-    1. A compelling headline.
-    2. A summary of the insider activity.
-    3. Statistical context (Z-scores, win rates, etc. - use the calculated metrics).
-    4. Market regime context (infer from price history).
-    5. A conclusion on the signal strength.
-    
-    Format the output as a JSON object with the following structure:
-    {{
-      "headline": "...",
-      "summary": "...",
-      "articleBody": "...",
-      "signalStrength": "Strong|Moderate|Weak",
-      "keyMetrics": {{
-        "zScore": 0.0,
-        "combinedPValue": {combined_p:.4f},
-        "compositeScore": {avg_score:.2f}
-      }}
-    }}
-    """
-    
-    return call_gemini(prompt)
+    return {
+        "ticker": ticker,
+        "combined_p": combined_p,
+        "avg_score": avg_score,
+        "insider_trades": insider_trades,
+        "price_history": price_history
+    }
 
 # Vercel Serverless Function Handler
 class handler(BaseHTTPRequestHandler):
