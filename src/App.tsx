@@ -22,12 +22,15 @@ export default function App() {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
+  const isEvaluator = localStorage.getItem('evaluatorMode') === 'true';
+  const activeUser = user || (isEvaluator ? { uid: 'evaluator', email: 'evaluator@hackathon.local', isAnonymous: true } : null);
+
   return (
     <Router>
       <Routes>
-        <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LandingPage />} />
-        <Route path="/evaluator-login" element={user ? <Navigate to="/dashboard" /> : <EvaluatorLogin />} />
-        <Route path="/dashboard/*" element={user ? <Dashboard user={user} /> : <Navigate to="/" />} />
+        <Route path="/" element={activeUser ? <Navigate to="/dashboard" /> : <LandingPage />} />
+        <Route path="/evaluator-login" element={activeUser ? <Navigate to="/dashboard" /> : <EvaluatorLogin />} />
+        <Route path="/dashboard/*" element={activeUser ? <Dashboard user={activeUser} /> : <Navigate to="/" />} />
       </Routes>
     </Router>
   );

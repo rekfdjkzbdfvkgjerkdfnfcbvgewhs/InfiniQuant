@@ -12,19 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { GoogleGenAI } from "@google/genai";
 
 export default function Dashboard({ user }: { user: any }) {
-  const [ticker, setTicker] = useState("TITAN");
-  const [insiderData, setInsiderData] = useState(
-    JSON.stringify([
-      { category: "Promoter", valueCr: 14.2, stakeDeltaPct: 0.5, marketCapCr: 150000, z_score: 3.4 }
-    ], null, 2)
-  );
-  const [priceHistory, setPriceHistory] = useState(
-    JSON.stringify([
-      100, 102, 101, 105, 104, 108, 110, 109, 112, 115
-    ], null, 2)
-  );
+  const [queryText, setQueryText] = useState("Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T. Recent prices: 130, 128, 125, 120, 115, 118, 125.");
   
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState("");
   const [result, setResult] = useState<any>(null);
   const [savedArticles, setSavedArticles] = useState<any[]>([]);
 
@@ -43,17 +34,52 @@ export default function Dashboard({ user }: { user: any }) {
     }
   };
 
+  const handleLogout = async () => {
+    if (user.isAnonymous && user.uid === 'evaluator') {
+      localStorage.removeItem('evaluatorMode');
+      window.location.href = '/';
+    } else {
+      await logout();
+    }
+  };
+
   const handleAnalyze = async () => {
+    if (!queryText.trim()) return;
     setLoading(true);
+    setResult(null);
     try {
-      // 1. Get statistical metrics from Python backend
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      // Step 1: Extract Data
+      setLoadingStep("Extracting quantitative data from natural language...");
+      const extractionPrompt = `
+      Extract financial data EXACTLY as provided in the following natural language query. 
+      CRITICAL: DO NOT hallucinate, simulate, or fabricate any data. This tool is used by real media houses for rigorous financial journalism. If specific numbers, trades, or prices are missing from the text, return empty arrays or null. Only extract facts explicitly stated in the text.
+      
+      Query: "${queryText}"
+      
+      Format as JSON with: 
+      - ticker (string, extract from text or "UNKNOWN")
+      - insiderTrades (array of objects with: category ['Promoter', 'Director', 'Officer', 'Employee'], valueCr (number, in crores/millions), stakeDeltaPct (number), marketCapCr (number), z_score (number)). Only include trades explicitly mentioned.
+      - priceHistory (array of numbers representing recent daily prices). Only include prices explicitly mentioned.
+      `;
+
+      const extractionResponse = await ai.models.generateContent({
+        model: "gemini-3.1-pro-preview",
+        contents: extractionPrompt,
+        config: { responseMimeType: "application/json" }
+      });
+      const extractedData = JSON.parse(extractionResponse.text || "{}");
+
+      // Step 2: Python Backend Math
+      setLoadingStep("Running statistical rigor models (Z-Scores, Fisher's Combined p)...");
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticker,
-          insiderTrades: JSON.parse(insiderData),
-          priceHistory: JSON.parse(priceHistory)
+          ticker: extractedData.ticker || "UNKNOWN",
+          insiderTrades: extractedData.insiderTrades || [],
+          priceHistory: extractedData.priceHistory || []
         })
       });
       const metrics = await response.json();
@@ -62,9 +88,8 @@ export default function Dashboard({ user }: { user: any }) {
         throw new Error(metrics.error);
       }
 
-      // 2. Orchestrate article generation using Gemini from the frontend
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
+      // Step 3: Orchestrate article generation
+      setLoadingStep("Drafting journalistic narrative...");
       const prompt = `
       You are a quantitative financial journalist. You have been provided with insider trades and price history for ${metrics.ticker}.
       
@@ -109,12 +134,13 @@ export default function Dashboard({ user }: { user: any }) {
       });
 
       const resultData = JSON.parse(geminiResponse.text || "{}");
-      setResult(resultData);
+      setResult({ ...resultData, ticker: metrics.ticker });
     } catch (error) {
       console.error("Analysis failed", error);
       alert("Analysis failed. Check console for details.");
     } finally {
       setLoading(false);
+      setLoadingStep("");
     }
   };
 
@@ -123,7 +149,6 @@ export default function Dashboard({ user }: { user: any }) {
     try {
       await addDoc(collection(db, "articles"), {
         ...result,
-        ticker,
         authorId: user.uid,
         authorEmail: user.email || "anonymous@evaluator",
         createdAt: new Date().toISOString()
@@ -132,7 +157,7 @@ export default function Dashboard({ user }: { user: any }) {
       fetchSavedArticles();
     } catch (error) {
       console.error("Failed to save article", error);
-      alert("Failed to save article.");
+      alert("Failed to save article. Note: Evaluator mode may not have database write permissions.");
     }
   };
 
@@ -145,7 +170,7 @@ export default function Dashboard({ user }: { user: any }) {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-sm text-slate-500">{user.isAnonymous ? "Evaluator (Anonymous)" : user.email}</span>
-          <Button variant="ghost" size="icon" onClick={logout}>
+          <Button variant="ghost" size="icon" onClick={handleLogout}>
             <LogOut className="h-5 w-5" />
           </Button>
         </div>
@@ -155,33 +180,22 @@ export default function Dashboard({ user }: { user: any }) {
         <div className="lg:col-span-4 space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Data Input</CardTitle>
-              <CardDescription>Enter the raw financial data for analysis.</CardDescription>
+              <CardTitle>Natural Language Query</CardTitle>
+              <CardDescription>Describe the market scenario or insider activity you want to analyze.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Stock Ticker</Label>
-                <Input value={ticker} onChange={(e) => setTicker(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Insider Trades (JSON Array)</Label>
                 <Textarea 
-                  className="font-mono text-xs h-32" 
-                  value={insiderData} 
-                  onChange={(e) => setInsiderData(e.target.value)} 
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Price History (JSON Array of Prices)</Label>
-                <Textarea 
-                  className="font-mono text-xs h-32" 
-                  value={priceHistory} 
-                  onChange={(e) => setPriceHistory(e.target.value)} 
+                  className="h-40 resize-none" 
+                  placeholder="e.g., Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T. Recent prices: 130, 128, 125, 120, 115, 118, 125."
+                  value={queryText} 
+                  onChange={(e) => setQueryText(e.target.value)} 
                 />
               </div>
               <Button className="w-full" onClick={handleAnalyze} disabled={loading}>
-                {loading ? "Running Statistical Pipeline..." : "Generate Rigorous Analysis"}
+                {loading ? "Processing..." : "Generate Rigorous Analysis"}
               </Button>
+              {loading && <p className="text-xs text-center text-slate-500 animate-pulse mt-2">{loadingStep}</p>}
             </CardContent>
           </Card>
 
