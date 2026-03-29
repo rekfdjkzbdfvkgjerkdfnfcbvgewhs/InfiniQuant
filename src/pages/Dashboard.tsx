@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { GoogleGenAI } from "@google/genai";
 
 export default function Dashboard({ user }: { user: any }) {
-  const [queryText, setQueryText] = useState("Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T. Recent prices: 130, 128, 125, 120, 115, 118, 125.");
+  const [queryText, setQueryText] = useState("Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T.");
   
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState("");
@@ -57,7 +57,7 @@ export default function Dashboard({ user }: { user: any }) {
       Your job is to extract the exact financial data. 
       
       CRITICAL: This tool is used by real media houses for rigorous financial journalism. DO NOT fabricate or hallucinate data.
-      If the journalist omitted specific numbers (like market cap, exact trade value, or recent prices), YOU MUST USE GOOGLE SEARCH to find the real, factual numbers for this specific event and company.
+      If the journalist omitted specific numbers (like market cap or exact trade value), YOU MUST USE GOOGLE SEARCH to find the real, factual numbers for this specific event and company.
       If you cannot find the exact real numbers via search, leave them as null or 0, but DO NOT invent them.
       
       Query: "${queryText}"
@@ -65,7 +65,6 @@ export default function Dashboard({ user }: { user: any }) {
       Format as JSON with: 
       - ticker (string, extract from text or "UNKNOWN")
       - insiderTrades (array of objects with: category ['Promoter', 'Director', 'Officer', 'Employee'], valueCr (number, in crores/millions), stakeDeltaPct (number), marketCapCr (number), z_score (number)). 
-      - priceHistory (array of numbers representing recent daily prices).
       `;
 
       const extractionResponse = await ai.models.generateContent({
@@ -83,8 +82,7 @@ export default function Dashboard({ user }: { user: any }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ticker: extractedData.ticker || "UNKNOWN",
-          insiderTrades: extractedData.insiderTrades || [],
-          priceHistory: extractedData.priceHistory || []
+          insiderTrades: extractedData.insiderTrades || []
         })
       });
       const metrics = await response.json();
@@ -194,7 +192,7 @@ export default function Dashboard({ user }: { user: any }) {
               <div className="space-y-2">
                 <Textarea 
                   className="h-40 resize-none" 
-                  placeholder="e.g., Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T. Recent prices: 130, 128, 125, 120, 115, 118, 125."
+                  placeholder="e.g., Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T."
                   value={queryText} 
                   onChange={(e) => setQueryText(e.target.value)} 
                 />

@@ -1,2 +1,1 @@
-# No external dependencies required for the pure Python analysis script.
-# It uses only the standard library (math, random, json, urllib).
+yfinance==0.2.37

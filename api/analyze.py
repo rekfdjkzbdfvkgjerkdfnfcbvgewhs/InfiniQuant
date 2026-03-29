@@ -6,6 +6,13 @@ from urllib import request, parse
 import os
 from http.server import BaseHTTPRequestHandler
 
+try:
+    import yfinance as yf
+except ImportError:
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yfinance", "pandas", "requests"])
+    import yfinance as yf
+
 def welford_update(n, mean, M2, x):
     n += 1
     delta = x - mean
@@ -58,6 +65,15 @@ def process_analysis(data):
     ticker = data.get("ticker") or "UNKNOWN"
     insider_trades = data.get("insiderTrades") or []
     price_history = data.get("priceHistory") or []
+    
+    if ticker and ticker != "UNKNOWN":
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="1mo")
+            if not hist.empty:
+                price_history = [round(p, 2) for p in hist['Close'].tolist()]
+        except Exception as e:
+            pass
     
     p_values = []
     for trade in insider_trades:

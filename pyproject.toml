@@ -2,4 +2,4 @@
 name = "infiniquant"
 version = "0.1.0"
 description = "Quantitative Foundations for Journalist's Alpha Copilot"
-dependencies = []
+dependencies = ["yfinance"]
