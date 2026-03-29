@@ -41,20 +41,28 @@ def fishers_combined_p(p_values):
 def composite_insider_score(category, value_cr, stake_delta_pct, market_cap_cr, num_insiders):
     w1, w2, w3, w4 = 0.35, 0.30, 0.20, 0.15
     f1 = {'Promoter': 1.0, 'Director': 0.70, 'Officer': 0.45}.get(category, 0.25)
-    f2 = min(math.log(1 + value_cr) / math.log(1 + 50), 1.0)
-    f3 = min(stake_delta_pct / 5.0, 1.0)
-    f4 = min(1000.0 / market_cap_cr, 1.0)
+    f2 = min(math.log(1 + max(value_cr, 0)) / math.log(1 + 50), 1.0)
+    f3 = min(max(stake_delta_pct, 0) / 5.0, 1.0)
+    f4 = min(1000.0 / max(market_cap_cr, 1.0), 1.0)
     s = w1 * f1 + w2 * f2 + w3 * f3 + w4 * f4
     return min(s + 0.10 * (num_insiders - 1), 1.0)
 
+def sanitize_float(val, default=0.0):
+    try:
+        if val is None: return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 def process_analysis(data):
-    ticker = data.get("ticker", "UNKNOWN")
-    insider_trades = data.get("insiderTrades", [])
-    price_history = data.get("priceHistory", [])
+    ticker = data.get("ticker") or "UNKNOWN"
+    insider_trades = data.get("insiderTrades") or []
+    price_history = data.get("priceHistory") or []
     
     p_values = []
     for trade in insider_trades:
-        z = trade.get("z_score", 0.0)
+        if not isinstance(trade, dict): continue
+        z = sanitize_float(trade.get("z_score"), 0.0)
         p_val = 1.0 - normal_cdf(z)
         p_values.append(p_val)
         
@@ -62,11 +70,12 @@ def process_analysis(data):
     
     scores = []
     for trade in insider_trades:
+        if not isinstance(trade, dict): continue
         score = composite_insider_score(
             trade.get("category", "Employee"),
-            trade.get("valueCr", 0.0),
-            trade.get("stakeDeltaPct", 0.0),
-            trade.get("marketCapCr", 1000.0),
+            sanitize_float(trade.get("valueCr"), 0.0),
+            sanitize_float(trade.get("stakeDeltaPct"), 0.0),
+            sanitize_float(trade.get("marketCapCr"), 1000.0),
             len(insider_trades)
         )
         scores.append(score)

@@ -53,20 +53,25 @@ export default function Dashboard({ user }: { user: any }) {
       // Step 1: Extract Data
       setLoadingStep("Extracting quantitative data from natural language...");
       const extractionPrompt = `
-      Extract financial data EXACTLY as provided in the following natural language query. 
-      CRITICAL: DO NOT hallucinate, simulate, or fabricate any data. This tool is used by real media houses for rigorous financial journalism. If specific numbers, trades, or prices are missing from the text, return empty arrays or null. Only extract facts explicitly stated in the text.
+      You are a quantitative financial data extractor. A journalist has provided a natural language query about a market event.
+      Your job is to extract the exact financial data. 
+      
+      CRITICAL: This tool is used by real media houses for rigorous financial journalism. DO NOT fabricate or hallucinate data.
+      If the journalist omitted specific numbers (like market cap, exact trade value, or recent prices), YOU MUST USE GOOGLE SEARCH to find the real, factual numbers for this specific event and company.
+      If you cannot find the exact real numbers via search, leave them as null or 0, but DO NOT invent them.
       
       Query: "${queryText}"
       
       Format as JSON with: 
       - ticker (string, extract from text or "UNKNOWN")
-      - insiderTrades (array of objects with: category ['Promoter', 'Director', 'Officer', 'Employee'], valueCr (number, in crores/millions), stakeDeltaPct (number), marketCapCr (number), z_score (number)). Only include trades explicitly mentioned.
-      - priceHistory (array of numbers representing recent daily prices). Only include prices explicitly mentioned.
+      - insiderTrades (array of objects with: category ['Promoter', 'Director', 'Officer', 'Employee'], valueCr (number, in crores/millions), stakeDeltaPct (number), marketCapCr (number), z_score (number)). 
+      - priceHistory (array of numbers representing recent daily prices).
       `;
 
       const extractionResponse = await ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: extractionPrompt,
+        tools: [{ googleSearch: {} }],
         config: { responseMimeType: "application/json" }
       });
       const extractedData = JSON.parse(extractionResponse.text || "{}");
@@ -104,6 +109,8 @@ export default function Dashboard({ user }: { user: any }) {
       - Composite Insider Signal Score: ${metrics.avg_score.toFixed(2)}/1.00
       
       Analyze the data and generate a rigorous financial article.
+      If the data contains 0s or nulls for specific metrics, acknowledge that the exact figures were unavailable but focus on the available facts.
+      
       The article should include:
       1. A compelling headline.
       2. A summary of the insider activity.
