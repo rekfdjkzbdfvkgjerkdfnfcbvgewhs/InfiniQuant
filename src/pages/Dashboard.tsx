@@ -6,13 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { logout, db } from "@/lib/firebase";
 import { collection, addDoc, getDocs, query, orderBy } from "firebase/firestore";
-import { Activity, LogOut, FileText, BarChart, Save, History } from "lucide-react";
+import { Activity, LogOut, FileText, BarChart, Save, History, Copy, ExternalLink } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { GoogleGenAI } from "@google/genai";
 
 export default function Dashboard({ user }: { user: any }) {
-  const [queryText, setQueryText] = useState("Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T.");
+  const [queryText, setQueryText] = useState("Find a recent, significant insider trade or market event in the tech sector that investors need to know about right now.");
   
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState("");
@@ -51,19 +51,20 @@ export default function Dashboard({ user }: { user: any }) {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       // Step 1: Extract Data
-      setLoadingStep("Extracting quantitative data from natural language...");
+      setLoadingStep("Scouring the web for actionable market events...");
       const extractionPrompt = `
-      You are a quantitative financial data extractor. A journalist has provided a natural language query about a market event.
-      Your job is to extract the exact financial data. 
+      You are a quantitative financial data extractor and market researcher. A journalist has provided a query.
+      
+      If the query asks to "find" or "discover" headlines/events, YOU MUST USE GOOGLE SEARCH to find a recent, highly actionable market event or insider trade that helps investors make informed decisions. Pick ONE specific company/event to focus on.
+      If the query is about a specific event, extract its details.
       
       CRITICAL: This tool is used by real media houses for rigorous financial journalism. DO NOT fabricate or hallucinate data.
-      If the journalist omitted specific numbers (like market cap or exact trade value), YOU MUST USE GOOGLE SEARCH to find the real, factual numbers for this specific event and company.
       If you cannot find the exact real numbers via search, leave them as null or 0, but DO NOT invent them.
       
       Query: "${queryText}"
       
       Format as JSON with: 
-      - ticker (string, extract from text or "UNKNOWN")
+      - ticker (string, extract from text or find via search, or "UNKNOWN")
       - insiderTrades (array of objects with: category ['Promoter', 'Director', 'Officer', 'Employee'], valueCr (number, in crores/millions), stakeDeltaPct (number), marketCapCr (number), z_score (number)). 
       `;
 
@@ -92,7 +93,7 @@ export default function Dashboard({ user }: { user: any }) {
       }
 
       // Step 3: Orchestrate article generation
-      setLoadingStep("Drafting journalistic narrative...");
+      setLoadingStep("Drafting actionable journalistic narrative & fetching sources...");
       const prompt = `
       You are a quantitative financial journalist. You have been provided with insider trades and price history for ${metrics.ticker}.
       
@@ -109,19 +110,20 @@ export default function Dashboard({ user }: { user: any }) {
       Analyze the data and generate a rigorous financial article.
       If the data contains 0s or nulls for specific metrics, acknowledge that the exact figures were unavailable but focus on the available facts.
       
-      The article should include:
-      1. A compelling headline.
-      2. A summary of the insider activity.
-      3. Statistical context (Z-scores, win rates, etc. - use the calculated metrics).
-      4. Market regime context (infer from price history).
-      5. A conclusion on the signal strength.
+      CRITICAL INSTRUCTIONS:
+      1. Focus on generating a headline and narrative that ACTUALLY helps investors make informed decisions about stocks and/or markets. Explain the "Why" and the "So What".
+      2. Use the Google Search tool to find recent news, earnings reports, or macroeconomic factors affecting ${metrics.ticker} to provide real-world "Market Context".
+      3. Include exact Source Links (URLs) to the news articles or SEC filings you reference.
+      4. The article must be highly detailed, professional, and ready for publication.
       
       Format the output as a JSON object with the following structure:
       {
         "headline": "...",
         "summary": "...",
         "articleBody": "...",
+        "actionableTakeaway": "...",
         "signalStrength": "Strong|Moderate|Weak",
+        "sourceLinks": ["url1", "url2"],
         "keyMetrics": {
           "zScore": 0.0,
           "combinedPValue": ${metrics.combined_p.toFixed(4)},
@@ -133,6 +135,7 @@ export default function Dashboard({ user }: { user: any }) {
       const geminiResponse = await ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: prompt,
+        tools: [{ googleSearch: {} }],
         config: {
           responseMimeType: "application/json",
         }
@@ -166,6 +169,13 @@ export default function Dashboard({ user }: { user: any }) {
     }
   };
 
+  const handleCopy = () => {
+    if (!result) return;
+    const text = `${result.headline}\n\n${result.summary}\n\n${result.articleBody}\n\nSources:\n${(result.sourceLinks || []).join('\n')}`;
+    navigator.clipboard.writeText(text);
+    alert("Article copied to clipboard!");
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header className="px-6 py-4 border-b bg-white flex justify-between items-center sticky top-0 z-10">
@@ -192,7 +202,7 @@ export default function Dashboard({ user }: { user: any }) {
               <div className="space-y-2">
                 <Textarea 
                   className="h-40 resize-none" 
-                  placeholder="e.g., Analyze NVDA. On Oct 12, Director Smith sold 15M worth of shares (0.5% stake delta) at a 3.4 z-score. Market cap is 3T."
+                  placeholder="e.g., Find a recent, significant insider trade or market event in the tech sector that investors need to know about right now."
                   value={queryText} 
                   onChange={(e) => setQueryText(e.target.value)} 
                 />
@@ -230,11 +240,18 @@ export default function Dashboard({ user }: { user: any }) {
                 <CardTitle>Journalist's Output</CardTitle>
                 <CardDescription>Statistically validated narrative ready for publication.</CardDescription>
               </div>
-              {result && !result.createdAt && (
-                <Button variant="outline" size="sm" onClick={handleSave}>
-                  <Save className="w-4 h-4 mr-2" /> Save to Firestore
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {result && (
+                  <Button variant="outline" size="sm" onClick={handleCopy}>
+                    <Copy className="w-4 h-4 mr-2" /> Copy Article
+                  </Button>
+                )}
+                {result && !result.createdAt && (
+                  <Button variant="outline" size="sm" onClick={handleSave}>
+                    <Save className="w-4 h-4 mr-2" /> Save to Firestore
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="flex-1 overflow-auto">
               {result ? (
@@ -255,9 +272,33 @@ export default function Dashboard({ user }: { user: any }) {
                     <p className="text-lg font-medium text-slate-700 italic border-l-4 border-primary pl-4">
                       {result.summary}
                     </p>
+                    
+                    {result.actionableTakeaway && (
+                      <div className="bg-blue-50 border-l-4 border-blue-500 p-4 my-6 rounded-r-md">
+                        <h3 className="text-sm font-bold text-blue-800 uppercase tracking-wider mb-1">Actionable Investor Takeaway</h3>
+                        <p className="text-blue-900 font-medium">{result.actionableTakeaway}</p>
+                      </div>
+                    )}
+
                     <div className="prose prose-slate max-w-none mt-6 whitespace-pre-wrap font-serif">
                       {result.articleBody}
                     </div>
+                    
+                    {result.sourceLinks && result.sourceLinks.length > 0 && (
+                      <div className="mt-8 pt-6 border-t">
+                        <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Source Links</h3>
+                        <ul className="space-y-2">
+                          {result.sourceLinks.map((link: string, i: number) => (
+                            <li key={i}>
+                              <a href={link} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline flex items-center gap-1 text-sm">
+                                <ExternalLink className="w-3 h-3" />
+                                {link}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </TabsContent>
                   <TabsContent value="metrics" className="mt-4">
                     <div className="bg-slate-900 text-slate-50 p-4 rounded-md font-mono text-sm whitespace-pre-wrap">
